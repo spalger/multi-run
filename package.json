@@ -1,6 +1,6 @@
 {
   "name": "@spalger/mrun",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Just execute multiple commands at the same time please",
   "bin": {
     "mrun": "dist/cli.js"
