@@ -54,6 +54,17 @@ tasks.forEach(t => {
   const box = blessed.box({
     parent: layout,
     width: '100%',
+    alwaysScroll: true,
+    scrollable: true,
+    mouse: true,
+    keyable: true,
+    clickable: true,
+    scrollbar: {
+      ch: '█',
+      track: {
+        ch: '▕',
+      },
+    },
     height: `${Math.round(100 / tasks.length)}%`,
     border: 'line',
     label: t,
@@ -86,7 +97,7 @@ tasks.forEach(t => {
           return
         }
 
-        log.setLabel(` ${statusLabel(status)} ${t}`)
+        box.setLabel(` ${statusLabel(status)} ${t}`)
         push(null, `exitted with status ${status}\n`)
         push(null, h.nil)
       })
@@ -95,7 +106,15 @@ tasks.forEach(t => {
   .merge()
   .split()
   .each(l => {
+    const scrollPerc = box.getScrollPerc()
+    const atTop = scrollPerc === 0
+    const atBottom = scrollPerc === 100
+    const lineCount = box._clines ? box._clines.length : 0
+    const willOverflow = atTop && lineCount === box.getScrollHeight()
+    const shouldScroll = atBottom || willOverflow
+
     box.insertBottom(l)
+    if (shouldScroll) box.scroll(1)
     screen.render()
   })
 })
