@@ -2,9 +2,28 @@
 
 import blessed from 'blessed'
 import { spawn } from 'child_process'
+import { resolve, delimiter as pdelim } from 'path'
 import h from 'highland'
 
-const tasks = process.argv.slice(2)
+const pkg = require(resolve(process.cwd(), 'package.json'))
+const pkgBin = resolve(process.cwd(), 'node_modules/.bin')
+
+const scripts = pkg.scripts || {}
+const tasks = process.argv.slice(2).map(n => {
+  if (!scripts[n]) {
+    throw new Error(`missing script named ${n}`)
+  }
+
+  return scripts[n]
+})
+
+const running = new Set()
+let exitAttempts = 0
+
+if (!tasks.length) {
+  process.stderr.write('usage: mrun task [...tasks]\n')
+  process.exit(1)
+}
 
 const statusLabel = s => {
   if (s > 0) {
@@ -40,39 +59,74 @@ tasks.forEach(t => {
     label: t,
   })
 
-  const proc = spawn('npm', ['run', t], {
-    stdio: 'pipe',
+  const env = { ...process.env, FORCE_COLOR: true }
+  env.PATH = env.PATH
+    ? `${pkgBin}${pdelim}${env.PATH}`
+    : pkgBin
+
+  const proc = spawn(t, [], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+    shell: true,
+    env,
   })
 
-  box.insertBottom('started')
+  running.add(proc)
 
   h([
-    h([
-      h(proc.stdout),
-      h(proc.stderr),
-    ])
-    .merge()
-    .split(),
-
+    h(proc.stdout),
+    h(proc.stderr),
     h((push) => {
       proc.once('close', status => {
-        box.setLabel(` ${statusLabel(status)} ${t}`)
-        push(null, `exitted with status ${status}`)
+        running.delete(proc)
+
+        if (exitAttempts) {
+          // we triggered the exit, no
+          // need to log... it'd fail anyway
+          return
+        }
+
+        log.setLabel(` ${statusLabel(status)} ${t}`)
+        push(null, `exitted with status ${status}\n`)
         push(null, h.nil)
       })
     }),
   ])
   .merge()
+  .split()
   .each(l => {
     box.insertBottom(l)
     screen.render()
   })
 })
 
-// Quit on Escape, q, or Control-C.
-screen.key(['escape', 'q', 'C-c'], () => {
-  process.exit(0)
-})
-
 // Render the screen.
 screen.render()
+
+function exit() {
+  if (exitAttempts > 0) return
+
+  const program = screen.program
+  screen.destroy()
+  program.destroy()
+
+  ;(function gracefullExit() {
+    if (!running.size) return
+    if (exitAttempts >= 20 && exitAttempts % 20 === 0) {
+      process.stdout.write('still trying to close tasks...\n')
+    }
+
+    exitAttempts += 1
+    for (const proc of running) {
+      process.kill(-proc.pid)
+    }
+
+    setTimeout(gracefullExit, 100)
+  }())
+}
+
+process.on('SIGINT', exit)
+process.on('SIGTERM', exit)
+process.on('SIGHUP', exit)
+process.on('exit', exit)
+screen.key(['escape', 'q', 'C-c'], exit)
